@@ -1,6 +1,7 @@
 import { Sender } from './sender.js';
 import { Receiver } from './receiver.js';
 import { formatBytes, formatDuration } from './protocol.js';
+import { BrowserStorage, FolderStorage, supportsBrowserStorage, supportsFolderPicker } from './storage.js';
 
 const $ = (sel) => document.querySelector(sel);
 const params = new URLSearchParams(location.search);
@@ -8,7 +9,8 @@ const TEST_MODE = params.get('test') === '1';
 const MAX_ROWS = 200;
 const ACTIVE = new Set(['connecting', 'waiting', 'transferring', 'reconnecting', 'waiting-reconnect']);
 
-const canReceive = typeof window.showDirectoryPicker === 'function' || TEST_MODE;
+const useBrowserStorage = params.get('store') === 'browser' || (!supportsFolderPicker() && !TEST_MODE);
+const canReceive = useBrowserStorage ? supportsBrowserStorage() : true;
 const isMac = /Mac OS X/.test(navigator.userAgent);
 const isWindows = /Windows/.test(navigator.userAgent);
 
@@ -62,7 +64,7 @@ const STATUS_ICON = {
   failed: ['✕', 'Failed'],
 };
 
-function fileRows(files, { activeId } = {}) {
+function fileRows(files, { activeId, saveable } = {}) {
   let list = files;
   if (files.length > MAX_ROWS) {
     const idx = Math.max(0, files.findIndex((f) => f.id === activeId));
@@ -76,7 +78,9 @@ function fileRows(files, { activeId } = {}) {
       return `<li class="file ${f.status}">
         <span class="file-icon" title="${label}">${icon}</span>
         <span class="file-name" title="${esc(f.path)}">${esc(f.savedAs || f.path)}</span>
-        <span class="file-size">${progress !== null ? `${Math.floor(progress * 100)}% · ` : ''}${formatBytes(f.size)}</span>
+        <span class="file-size">${progress !== null ? `${Math.floor(progress * 100)}% · ` : ''}${formatBytes(f.size)}${
+          saveable && f.status === 'done' ? ` · <button type="button" class="link" data-action="save" data-id="${esc(f.id)}">${f.exported ? 'Save again' : 'Save'}</button>` : ''
+        }</span>
         ${f.error ? `<span class="file-error">${esc(f.error)}</span>` : ''}
       </li>`;
     })
@@ -114,6 +118,11 @@ function renderProgress(el, m, role) {
   const actions = [];
   if (ACTIVE.has(m.phase)) actions.push(`<button type="button" class="btn danger" data-action="cancel">Cancel</button>`);
   if (role === 'send' && (m.phase === 'error' || m.phase === 'declined')) actions.push(`<button type="button" class="btn primary" data-action="retry">Try again</button>`);
+  const browserStore = role === 'receive' && m.storage?.kind === 'browser';
+  if (browserStore && m.phase === 'done') {
+    actions.push(`<button type="button" class="btn" data-action="save-all">Save all again</button>`);
+    actions.push(`<button type="button" class="btn" data-action="free">Free up space</button>`);
+  }
   if (m.phase === 'done' || m.phase === 'cancelled') actions.push(`<button type="button" class="btn" data-action="again">${role === 'send' ? 'Send more files' : 'Receive more files'}</button>`);
 
   el.innerHTML = `
@@ -135,9 +144,16 @@ function renderProgress(el, m, role) {
       <div><dt>Files</dt><dd>${okCount} / ${m.files.length} verified${counts.failed ? ` · <span class="bad">${counts.failed} failed</span>` : ''}</dd></div>
     </dl>
     ${slow ? `<p class="tip">Tip: transfers over a phone hotspot are much faster on <strong>5 GHz</strong>. On Samsung: Settings → Connections → Mobile Hotspot → Band → 5 GHz, then reconnect both devices. The transfer resumes by itself.</p>` : ''}
-    ${role === 'receive' && m.phase === 'done' ? `<p class="hint">Files are in the folder you chose. Each one was checked block by block with SHA-256.</p>` : ''}
+    ${role === 'receive' && !browserStore && m.phase === 'done' ? `<p class="hint">Files are in the folder you chose. Each one was checked block by block with SHA-256.</p>` : ''}
+    ${browserStore && m.phase !== 'done' ? `<p class="hint">Each file is checked, then saved to your <strong>Downloads</strong> folder as soon as it finishes. If Safari asks whether to allow downloads from this site, choose <strong>Allow</strong>.</p>` : ''}
+    ${
+      browserStore && m.phase === 'done'
+        ? `<p class="hint">Every file was checked block by block with SHA-256 and saved to your <strong>Downloads</strong> folder. If one is missing, press its <strong>Save</strong> link. Once the downloads have finished, press <strong>Free up space</strong> to delete Safari's temporary copy.</p>`
+        : ''
+    }
+    ${m.freed ? `<p class="hint">Temporary copies deleted.</p>` : ''}
     ${actions.length ? `<div class="row">${actions.join('')}</div>` : ''}
-    <ul class="file-list">${fileRows(m.files, { activeId: m.current?.id })}</ul>
+    <ul class="file-list">${fileRows(m.files, { activeId: m.current?.id, saveable: browserStore && !m.freed })}</ul>
   `;
 }
 
@@ -279,6 +295,9 @@ const recvEls = {
   desc: $('#incoming-desc'),
   list: $('#incoming-list'),
   error: $('#incoming-error'),
+  acceptBtn: $('#accept-btn'),
+  dialogHint: $('#incoming-hint'),
+  saveStep: $('#save-step'),
 };
 
 const RECEIVE_STATUS = {
@@ -291,11 +310,16 @@ const RECEIVE_STATUS = {
   cancelled: 'Ready for another transfer with the same code.',
 };
 
+let storageError = '';
+let space = { pending: null, free: NaN };
+
 const renderReceive = throttledRenderer(() => {
   const r = receiver;
+  const browserStore = r.storage.kind === 'browser';
   recvEls.code.textContent = r.code ? `${r.code.slice(0, 3)} ${r.code.slice(3)}` : '––– –––';
-  recvEls.status.textContent = r.phase === 'error' ? r.message : RECEIVE_STATUS[r.phase] || '';
-  recvEls.status.className = `status-line ${r.phase}`;
+  recvEls.status.textContent = storageError || (r.phase === 'error' ? r.message : RECEIVE_STATUS[r.phase] || '');
+  recvEls.status.className = `status-line ${storageError ? 'error' : r.phase}`;
+  recvEls.saveStep.textContent = browserStore ? 'Press Accept here. Files are saved to your Downloads folder.' : 'Press Accept here and choose a folder to save into.';
   recvEls.card.classList.toggle('compact', r.files.length > 0);
   recvEls.progress.hidden = !r.files.length;
   if (r.files.length) renderProgress(recvEls.progress, r, 'receive');
@@ -306,6 +330,20 @@ const renderReceive = throttledRenderer(() => {
       msg.files.length === 1 ? '' : 's'
     }</strong> (${formatBytes(msg.total)}).`;
     recvEls.list.innerHTML = fileRows(msg.files.map((f) => ({ ...f, status: 'pending' })));
+    recvEls.acceptBtn.textContent = browserStore ? 'Accept' : 'Accept & choose folder';
+    if (browserStore && space.pending !== r.pending) {
+      space = { pending: r.pending, free: NaN };
+      r.storage.freeSpace().then((free) => {
+        space.free = free;
+        renderReceive();
+      });
+    }
+    const lowSpace = browserStore && space.free < msg.total * 2;
+    recvEls.dialogHint.innerHTML = browserStore
+      ? `Files go to your <strong>Downloads</strong> folder. While the transfer runs you need free disk space for about <strong>twice</strong> its size (${formatBytes(msg.total * 2)}). You can delete the temporary copy at the end.${
+          lowSpace ? ` <span class="bad">Safari reports only ${formatBytes(space.free)} available for this site.</span>` : ''
+        }`
+      : 'Choose a folder with enough free space. Files already received into that folder are skipped.';
     recvEls.error.hidden = !r.message;
     recvEls.error.textContent = r.message;
     if (!recvEls.dialog.open) recvEls.dialog.showModal();
@@ -315,23 +353,63 @@ const renderReceive = throttledRenderer(() => {
   wake.set(ACTIVE.has(r.phase));
 });
 
-function initReceiver() {
-  if (receiver) return;
-  const pickDirectory = TEST_MODE ? async () => (await navigator.storage.getDirectory()).getDirectoryHandle('received', { create: true }) : undefined;
-  receiver = new Receiver(renderReceive, { pickDirectory });
-  if (TEST_MODE) (window.__w2m ||= {}).receiver = receiver;
-  receiver.start();
-  renderReceive();
+function saveFile(f) {
+  receiver.storage
+    .download(f.savedAs)
+    .then(() => {
+      f.exported = true;
+      renderReceive();
+    })
+    .catch((err) => {
+      f.error = `Could not start the download: ${err?.message || err}`;
+      renderReceive();
+    });
 }
 
-$('#accept-btn').addEventListener('click', () => receiver.accept());
+async function initReceiver() {
+  if (receiver) return;
+  let storage;
+  if (useBrowserStorage) storage = new BrowserStorage();
+  else if (TEST_MODE) storage = new FolderStorage(async () => (await navigator.storage.getDirectory()).getDirectoryHandle('received', { create: true }));
+  else storage = new FolderStorage();
+  receiver = new Receiver(renderReceive, {
+    storage,
+    onFileSaved: (f) => storage.kind === 'browser' && saveFile(f),
+  });
+  if (TEST_MODE) (window.__w2m ||= {}).receiver = receiver;
+  renderReceive();
+  if (storage.kind === 'browser') {
+    try {
+      await storage.probe();
+    } catch (err) {
+      storageError = `This browser can't store incoming files (${err?.message || err}). Update Safari to the latest version, or open this page in Chrome or Edge.`;
+      return renderReceive();
+    }
+  }
+  receiver.start();
+}
+
+recvEls.acceptBtn.addEventListener('click', () => receiver.accept());
 $('#decline-btn').addEventListener('click', () => receiver.decline());
 recvEls.dialog.addEventListener('cancel', (e) => e.preventDefault());
 
-recvEls.progress.addEventListener('click', (e) => {
-  const action = e.target.closest('[data-action]')?.dataset.action;
+recvEls.progress.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action]');
+  const action = el?.dataset.action;
   if (action === 'cancel') receiver.cancel();
-  else if (action === 'again') receiver.newTransfer();
+  else if (action === 'save') {
+    const f = receiver.files.find((x) => x.id === el.dataset.id);
+    if (f) saveFile(f);
+  } else if (action === 'save-all') {
+    for (const f of receiver.files.filter((x) => x.status === 'done')) saveFile(f);
+  } else if (action === 'free') {
+    await receiver.storage.clear();
+    receiver.freed = true;
+    renderReceive();
+  } else if (action === 'again') {
+    receiver.freed = false;
+    receiver.newTransfer();
+  }
 });
 
 /* ---------- navigation ---------- */

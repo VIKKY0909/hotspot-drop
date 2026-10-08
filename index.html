@@ -33,12 +33,12 @@
           <button class="choice" id="choose-receive" type="button">
             <span class="choice-icon receive" aria-hidden="true"></span>
             <span class="choice-title">Receive on this device</span>
-            <span class="choice-sub">Get a 6-digit code, then accept the incoming files and choose where to save them.</span>
+            <span class="choice-sub">Get a 6-digit code, then accept the incoming files. Works in Safari, Chrome and Edge.</span>
             <span class="choice-badge" id="badge-receive" hidden>Suggested for this device</span>
           </button>
         </div>
         <p class="note" id="receive-support" hidden>
-          To receive, open this page in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong>. Safari and Firefox can't save large files straight to disk.
+          This browser can't receive large files. Use the latest <strong>Safari</strong>, <strong>Chrome</strong> or <strong>Edge</strong>.
         </p>
         <p class="note">Open the same address on the other device: <code id="page-url"></code></p>
       </section>
@@ -94,7 +94,7 @@
           <ol class="steps">
             <li>On the sending device, open this same page and choose <strong>Send</strong>.</li>
             <li>Pick the files, type this code, then press <strong>Send</strong>.</li>
-            <li>Press <strong>Accept</strong> here and choose a folder to save into.</li>
+            <li id="save-step">Press Accept here.</li>
           </ol>
         </div>
         <div class="card" id="receive-progress" hidden></div>
@@ -106,7 +106,7 @@
         <h2 id="incoming-title">Incoming files</h2>
         <p id="incoming-desc"></p>
         <ul class="file-list compact" id="incoming-list"></ul>
-        <p class="hint">Choose a folder with enough free space. Files you've already received in that folder are skipped.</p>
+        <p class="hint" id="incoming-hint"></p>
         <p class="error" id="incoming-error" hidden></p>
         <div class="row end">
           <button type="button" class="btn" id="decline-btn">Decline</button>

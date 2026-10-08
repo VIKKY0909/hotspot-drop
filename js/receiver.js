@@ -13,9 +13,10 @@ import {
 } from './protocol.js';
 
 export class Receiver {
-  constructor(onUpdate, { pickDirectory } = {}) {
+  constructor(onUpdate, { storage, onFileSaved } = {}) {
     this.onUpdate = onUpdate;
-    this.pickDirectory = pickDirectory || (() => window.showDirectoryPicker({ id: 'w2m-dest', mode: 'readwrite', startIn: 'downloads' }));
+    this.storage = storage;
+    this.onFileSaved = onFileSaved;
     this.phase = 'starting';
     this.message = '';
     this.code = '';
@@ -191,7 +192,7 @@ export class Receiver {
     if (!pending) return;
     let dir;
     try {
-      dir = await this.pickDirectory();
+      dir = await this.storage.pick();
     } catch (err) {
       if (err?.name === 'AbortError') return;
       this.message = `Could not use that folder: ${err?.message || err}`;
@@ -286,6 +287,7 @@ export class Receiver {
   }
 
   async loadManifest() {
+    if (this.storage.kind !== 'folder') return {};
     try {
       const file = await (await this.dir.getFileHandle(MANIFEST_NAME)).getFile();
       const data = JSON.parse(await file.text());
@@ -296,6 +298,7 @@ export class Receiver {
   }
 
   async saveManifest() {
+    if (this.storage.kind !== 'folder') return;
     try {
       const fh = await this.dir.getFileHandle(MANIFEST_NAME, { create: true });
       const w = await fh.createWritable();
@@ -334,8 +337,7 @@ export class Receiver {
         throw err;
       }
     }
-    const fh = await dir.getFileHandle(name, { create: true });
-    const writable = await fh.createWritable({ keepExistingData: false });
+    const writable = await this.storage.openWriter(dir, segs.slice(0, -1), name);
     return { writable, savedAs: [...segs.slice(0, -1), name].join('/') };
   }
 
@@ -443,6 +445,7 @@ export class Receiver {
     await this.saveManifest();
     this.meter.push(this.doneBytes);
     this.send({ t: 'done', id: f.id, ok: true, root: msg.root });
+    this.onFileSaved?.(f);
     this.emit();
   }
 

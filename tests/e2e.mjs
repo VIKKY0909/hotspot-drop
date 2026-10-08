@@ -11,6 +11,7 @@ import { serve } from './serve.mjs';
 const BIG_MB = Number(process.env.BIG_MB || 300);
 const CHANNEL = process.env.CHANNEL || 'chrome';
 const activePages = [];
+const BROWSER_STORE = process.env.STORE === 'browser';
 
 function log(...a) {
   console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
@@ -30,6 +31,7 @@ function makeFixtures() {
   closeSync(fd);
   writeFileSync(join(dir, 'notes.txt'), 'hello from windows\n'.repeat(1000));
   writeFileSync(join(dir, 'empty.dat'), '');
+  mkdirSync(join(dir, 'dl'));
   const folder = join(dir, 'Photos 2026');
   mkdirSync(join(folder, 'trip', 'day1'), { recursive: true });
   writeFileSync(join(folder, 'cover.jpg'), randomBytes(5 * 1024 * 1024 + 7));
@@ -84,7 +86,20 @@ async function main() {
     recv.on('pageerror', (e) => log('RECEIVER PAGE ERROR', e.message));
     if (process.env.VERBOSE) recv.on('console', (m) => log('receiver console:', m.text()));
     activePages.push(['receiver', recv]);
-    await recv.goto(`${base}/?test=1#receive`);
+    const downloads = new Map();
+    const downloadJobs = [];
+    if (BROWSER_STORE) {
+      recv.on('download', (d) => {
+        downloadJobs.push(
+          (async () => {
+            const p = join(fx.dir, 'dl', d.suggestedFilename());
+            await d.saveAs(p);
+            downloads.set(d.suggestedFilename(), createHash('sha256').update(readFileSync(p)).digest('hex'));
+          })(),
+        );
+      });
+    }
+    await recv.goto(`${base}/?test=1${BROWSER_STORE ? '&store=browser' : ''}#receive`);
     await waitPhase(recv, 'receiver', ['ready'], 30000);
     const code = await recv.evaluate(() => window.__w2m.receiver.code);
     log('receiver ready, code', code);
@@ -146,6 +161,34 @@ async function main() {
     log('sender summary', JSON.stringify(summary));
     log(`transferred ${(summary.total / 1048576).toFixed(0)} MB in ${secs.toFixed(1)} s incl. reconnect → ${(summary.total / 1048576 / secs).toFixed(1)} MB/s`);
     log('integrity re-requests (seeks):', await recv.evaluate(() => window.__seeks));
+
+    if (BROWSER_STORE) {
+      for (let i = 0; i < 100 && downloadJobs.length < Object.keys(expected).length; i++) await new Promise((r) => setTimeout(r, 200));
+      await Promise.all(downloadJobs);
+      for (const [path, hash] of Object.entries(expected)) {
+        const name = path.split('/').pop();
+        if (downloads.get(name) !== hash) {
+          failed = true;
+          log(`DOWNLOAD MISMATCH ${name}: expected ${hash.slice(0, 12)} got ${downloads.get(name)?.slice(0, 12)}`);
+        }
+      }
+      log(failed ? 'DOWNLOAD CHECK FAILED' : `all ${downloads.size} auto-downloaded files byte-identical`);
+      await recv.click('[data-action="free"]');
+      const left = await recv.waitForFunction(
+        async () => {
+          try {
+            await (await navigator.storage.getDirectory()).getDirectoryHandle('hotspot-drop-incoming');
+            return false;
+          } catch {
+            return true;
+          }
+        },
+        null,
+        { timeout: 10000 },
+      );
+      log('free up space: temporary copies removed', !!left);
+      return;
+    }
 
     const actual = await recv.evaluate(async () => {
       const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('received');
@@ -210,9 +253,9 @@ async function main() {
     await browser.close();
     server.close();
     rmSync(fx.dir, { recursive: true, force: true });
+    log(failed ? 'E2E FAILED' : 'E2E PASSED');
+    process.exit(failed ? 1 : 0);
   }
-  log(failed ? 'E2E FAILED' : 'E2E PASSED');
-  process.exit(failed ? 1 : 0);
 }
 
 main();
