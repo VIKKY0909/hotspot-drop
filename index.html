@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hotspot Drop: send big files PC → Mac</title>
+    <meta name="description" content="Send large files directly between two computers on the same Wi-Fi or hotspot. Nothing to install, nothing uploaded." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235b8cff'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Hotspot Drop home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        Hotspot Drop
+      </a>
+      <span class="tagline">Direct device-to-device · nothing uploaded</span>
+    </header>
+
+    <main>
+      <section id="view-home" class="view">
+        <h1>Send big files from one computer to another</h1>
+        <p class="lead">
+          Open this page on both devices while they're on the same hotspot or Wi-Fi. Files go straight between them, are checked block by block, and resume automatically if the connection drops.
+        </p>
+        <div class="choice-grid">
+          <button class="choice" id="choose-send" type="button">
+            <span class="choice-icon send" aria-hidden="true"></span>
+            <span class="choice-title">Send from this device</span>
+            <span class="choice-sub">Pick files or folders, then enter the code shown on the other device.</span>
+            <span class="choice-badge" id="badge-send" hidden>Suggested for this device</span>
+          </button>
+          <button class="choice" id="choose-receive" type="button">
+            <span class="choice-icon receive" aria-hidden="true"></span>
+            <span class="choice-title">Receive on this device</span>
+            <span class="choice-sub">Get a 6-digit code, then accept the incoming files and choose where to save them.</span>
+            <span class="choice-badge" id="badge-receive" hidden>Suggested for this device</span>
+          </button>
+        </div>
+        <p class="note" id="receive-support" hidden>
+          To receive, open this page in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong>. Safari and Firefox can't save large files straight to disk.
+        </p>
+        <p class="note">Open the same address on the other device: <code id="page-url"></code></p>
+      </section>
+
+      <section id="view-send" class="view" hidden>
+        <button class="back" type="button" data-home>← Back</button>
+        <div class="card">
+          <h2><span class="step">1</span> Choose what to send</h2>
+          <div class="dropzone" id="dropzone" tabindex="0">
+            <p>Drag files or folders here</p>
+            <div class="row">
+              <button type="button" class="btn" id="add-files">Add files</button>
+              <button type="button" class="btn" id="add-folder">Add a folder</button>
+            </div>
+            <input type="file" id="input-files" multiple hidden />
+            <input type="file" id="input-folder" webkitdirectory multiple hidden />
+          </div>
+          <div class="selection" id="selection" hidden>
+            <div class="selection-head">
+              <strong id="selection-summary"></strong>
+              <button type="button" class="link" id="clear-files">Clear</button>
+            </div>
+            <ul class="file-list compact" id="selection-list"></ul>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2><span class="step">2</span> Enter the code shown on the receiving device</h2>
+          <form id="send-form" class="code-form" autocomplete="off">
+            <input
+              id="code-input"
+              class="code-input"
+              inputmode="numeric"
+              maxlength="7"
+              placeholder="000 000"
+              aria-label="6-digit code"
+              required
+            />
+            <button type="submit" class="btn primary" id="send-btn" disabled>Send</button>
+          </form>
+          <p class="hint">Starting the send is your approval on this device. The receiver then accepts on theirs.</p>
+        </div>
+
+        <div class="card" id="send-progress" hidden></div>
+      </section>
+
+      <section id="view-receive" class="view" hidden>
+        <button class="back" type="button" data-home>← Back</button>
+        <div class="card code-card" id="code-card">
+          <p class="eyebrow">Your code</p>
+          <p class="code-display" id="code-display">––– –––</p>
+          <p class="status-line" id="receive-status">Connecting…</p>
+          <ol class="steps">
+            <li>On the sending device, open this same page and choose <strong>Send</strong>.</li>
+            <li>Pick the files, type this code, then press <strong>Send</strong>.</li>
+            <li>Press <strong>Accept</strong> here and choose a folder to save into.</li>
+          </ol>
+        </div>
+        <div class="card" id="receive-progress" hidden></div>
+      </section>
+    </main>
+
+    <dialog id="incoming-dialog" aria-labelledby="incoming-title">
+      <form method="dialog" class="dialog-body">
+        <h2 id="incoming-title">Incoming files</h2>
+        <p id="incoming-desc"></p>
+        <ul class="file-list compact" id="incoming-list"></ul>
+        <p class="hint">Choose a folder with enough free space. Files you've already received in that folder are skipped.</p>
+        <p class="error" id="incoming-error" hidden></p>
+        <div class="row end">
+          <button type="button" class="btn" id="decline-btn">Decline</button>
+          <button type="button" class="btn primary" id="accept-btn">Accept &amp; choose folder</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="vendor/peerjs.min.js"></script>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
