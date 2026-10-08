@@ -74,7 +74,7 @@ async function main() {
   const fx = makeFixtures();
   const expected = expectedHashes(fx);
   const server = await serve(0);
-  const base = `http://localhost:${server.address().port}`;
+  const base = (process.env.BASE || `http://localhost:${server.address().port}`).replace(/\/$/, '');
   const browser = await chromium.launch({ channel: CHANNEL, headless: process.env.HEADED ? false : true });
   let failed = false;
   try {
